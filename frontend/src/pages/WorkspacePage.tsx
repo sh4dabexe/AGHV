@@ -214,34 +214,39 @@ export const WorkspacePage: React.FC = () => {
         },
       }, user?.id);
 
-      if (result.success) {
-        const updatedProject: Project = {
-          ...project,
+      if (!result.success) {
+        setAnalysisError('error' in result ? result.error : {
+          code: 'ANALYSIS_FAILED',
+          message: 'Analysis failed to complete.',
+          stage: 'ANALYSIS',
+        });
+        return;
+      }
+
+      const updatedProject: Project = {
+        ...project,
+        repositoryUrl: targetRepo,
+        commitSha: result.report.commit_sha || project.commitSha,
+        lastAnalyzedAt: result.report.timestamp,
+        status: 'completed',
+        latestReport: result.report,
+      };
+      setProject(updatedProject);
+
+      // 3. Persist latest report and status to Supabase and Backend
+      await ProjectService.updateProject(
+        project.id,
+        {
           repositoryUrl: targetRepo,
-          commitSha: result.report.commit_sha || project.commitSha,
-          lastAnalyzedAt: result.report.timestamp,
           status: 'completed',
           latestReport: result.report,
-        };
-        setProject(updatedProject);
+        },
+        user?.id
+      ).catch(() => {});
 
-        // 3. Persist latest report and status to Supabase and Backend
-        await ProjectService.updateProject(
-          project.id,
-          {
-            repositoryUrl: targetRepo,
-            status: 'completed',
-            latestReport: result.report,
-          },
-          user?.id
-        ).catch(() => {});
-
-        setNoticeMessage(
-          `Verification complete. ${result.report.summary.verified_count} of ${result.report.summary.total_claims} claims verified against repository AST.`
-        );
-      } else {
-        setAnalysisError(result.error);
-      }
+      setNoticeMessage(
+        `Verification complete. ${result.report.summary.verified_count} of ${result.report.summary.total_claims} claims verified against repository AST.`
+      );
     } catch (err: any) {
       setAnalysisError({
         code: 'UNEXPECTED_ERROR',
