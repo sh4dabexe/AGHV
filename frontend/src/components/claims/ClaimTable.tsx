@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -9,7 +9,9 @@ import {
   HelpCircle,
   CheckCircle2,
   Terminal,
-  ArrowRight
+  ArrowRight,
+  Search,
+  X
 } from 'lucide-react';
 import { ClaimValidation, EvidenceReference } from '../../types/report';
 import { ClaimStatusBadge } from './ClaimStatusBadge';
@@ -22,6 +24,8 @@ interface ClaimTableProps {
 export const ClaimTable: React.FC<ClaimTableProps> = ({ claims }) => {
   const [expandedClaimId, setExpandedClaimId] = useState<string | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceReference | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
   const toggleExpand = (id: string) => {
     setExpandedClaimId(expandedClaimId === id ? null : id);
@@ -33,6 +37,25 @@ export const ClaimTable: React.FC<ClaimTableProps> = ({ claims }) => {
       toggleExpand(id);
     }
   };
+
+  const filteredClaims = useMemo(() => {
+    if (!claims) return [];
+    return claims.filter((claim) => {
+      // Status filter
+      if (statusFilter !== 'ALL' && claim.status !== statusFilter) {
+        return false;
+      }
+      // Search query filter
+      if (searchQuery.trim().length > 0) {
+        const query = searchQuery.toLowerCase();
+        const matchesText = (claim.text || '').toLowerCase().includes(query);
+        const matchesId = (claim.claim_id || '').toLowerCase().includes(query);
+        const matchesReason = (claim.reason || '').toLowerCase().includes(query);
+        if (!matchesText && !matchesId && !matchesReason) return false;
+      }
+      return true;
+    });
+  }, [claims, statusFilter, searchQuery]);
 
   if (!claims || claims.length === 0) {
     return (
@@ -48,8 +71,80 @@ export const ClaimTable: React.FC<ClaimTableProps> = ({ claims }) => {
     );
   }
 
+  const verifiedCount = claims.filter((c) => c.status === 'VERIFIED').length;
+  const partialCount = claims.filter((c) => c.status === 'PARTIALLY_VERIFIED').length;
+  const notVerifiedCount = claims.filter((c) => c.status === 'NOT_VERIFIED').length;
+  const insufficientCount = claims.filter((c) => c.status === 'INSUFFICIENT_EVIDENCE').length;
+
   return (
     <div className="w-full flex flex-col gap-4">
+      {/* Search & Filter Controls */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-xl bg-black/[0.02] dark:bg-white/[0.02] border border-[var(--border-soft)]">
+        {/* Search input */}
+        <div className="relative flex-1 flex items-center">
+          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search claims by keyword, ID, or evidence..."
+            className="w-full pl-9 pr-8 py-1.5 text-xs sm:text-sm bg-transparent border border-[var(--border-soft)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--color-dusty-rose)] transition-colors"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status filter pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+          {[
+            { id: 'ALL', label: 'All', count: claims.length },
+            { id: 'VERIFIED', label: 'Verified', count: verifiedCount, color: 'text-[var(--status-verified)]' },
+            { id: 'PARTIALLY_VERIFIED', label: 'Partial', count: partialCount, color: 'text-[var(--status-partial)]' },
+            { id: 'NOT_VERIFIED', label: 'Not Verified', count: notVerifiedCount, color: 'text-[var(--status-not-verified)]' },
+            { id: 'INSUFFICIENT_EVIDENCE', label: 'Insufficient', count: insufficientCount, color: 'text-[var(--text-muted)]' },
+          ].map((pill) => {
+            const active = statusFilter === pill.id;
+            return (
+              <button
+                key={pill.id}
+                onClick={() => setStatusFilter(pill.id)}
+                className={`text-xs px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                  active
+                    ? 'bg-[var(--color-merlot)] text-[var(--color-pale-blush)] font-bold border border-[var(--border-soft)]'
+                    : 'bg-black/5 dark:bg-white/5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/10'
+                }`}
+              >
+                <span>{pill.label}</span>
+                <span className={`text-[10px] font-mono px-1 rounded ${active ? 'bg-black/20 text-white' : 'text-[var(--text-muted)]'}`}>
+                  {pill.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {filteredClaims.length === 0 ? (
+        <div className="ui-card p-6 text-center flex flex-col items-center justify-center gap-2">
+          <p className="text-xs text-[var(--text-secondary)]">No claims match the active search query or filter.</p>
+          <button
+            onClick={() => {
+              setSearchQuery('');
+              setStatusFilter('ALL');
+            }}
+            className="text-xs font-semibold text-[var(--color-dusty-rose)] hover:underline"
+          >
+            Reset filters
+          </button>
+        </div>
+      ) : null}
+
       {/* Desktop & Tablet View: Generous, Spacious Audit Table */}
       <div className="hidden md:block w-full overflow-hidden ui-card">
         <div className="overflow-x-auto">
@@ -64,7 +159,7 @@ export const ClaimTable: React.FC<ClaimTableProps> = ({ claims }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-soft)] text-sm">
-              {claims.map((claim) => {
+              {filteredClaims.map((claim) => {
                 const isExpanded = expandedClaimId === claim.claim_id;
                 return (
                   <React.Fragment key={claim.claim_id}>
@@ -262,7 +357,7 @@ export const ClaimTable: React.FC<ClaimTableProps> = ({ claims }) => {
 
       {/* Mobile View: Clean Stacked Cards */}
       <div className="md:hidden flex flex-col gap-4">
-        {claims.map((claim) => {
+        {filteredClaims.map((claim) => {
           const isExpanded = expandedClaimId === claim.claim_id;
           return (
             <div

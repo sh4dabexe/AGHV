@@ -281,20 +281,88 @@ export class EvidenceGraphBuilder {
     for (const claim of claims) {
        const reqNode = this.graph.getNodesByType('requirement').find(r => r.metadata?.claim_id === claim.claim_id);
        if (reqNode) {
-          const keywords = claim.text.toLowerCase().split(' ').filter(k => k.length > 3);
+          const rawKeywords = claim.text.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(k => k.length > 3);
+          const stopWords = new Set(['this', 'that', 'with', 'from', 'have', 'more', 'some', 'than', 'into', 'only', 'user', 'will', 'must', 'each']);
+          const keywords = rawKeywords.filter(k => !stopWords.has(k));
+
+          const chainNodes: string[] = [claim.claim_id, reqNode.id];
+          const chainEdges: string[] = [`EDGE-${claim.claim_id}-${reqNode.id}`];
           let foundConnection = false;
           let hasExecution = false;
 
+          // 1. Link to matching routes
           for (const route of this.graph.getNodesByType('route')) {
              if (keywords.some(k => route.label.toLowerCase().includes(k))) {
+                const edgeId = `EDGE-${reqNode.id}-${route.id}`;
                 this.graph.addEdge({
-                  edge_id: `EDGE-${reqNode.id}-${route.id}`,
+                  edge_id: edgeId,
                   from: reqNode.id,
                   to: route.id,
                   type: 'REQUIREMENT_SUPPORTED_BY',
-                  confidence: 0.5,
+                  confidence: 0.7,
                   evidence_refs: []
                 });
+                chainNodes.push(route.id);
+                chainEdges.push(edgeId);
+                foundConnection = true;
+             }
+          }
+
+          // 2. Link to matching symbols (classes, functions, components)
+          for (const sym of this.graph.getNodesByType('symbol')) {
+             if (keywords.some(k => sym.label.toLowerCase().includes(k))) {
+                const edgeId = `EDGE-${reqNode.id}-${sym.id}`;
+                this.graph.addEdge({
+                  edge_id: edgeId,
+                  from: reqNode.id,
+                  to: sym.id,
+                  type: 'REQUIREMENT_SUPPORTED_BY',
+                  confidence: 0.6,
+                  evidence_refs: []
+                });
+                chainNodes.push(sym.id);
+                chainEdges.push(edgeId);
+                foundConnection = true;
+             }
+          }
+
+          // 3. Link to matching database nodes
+          for (const db of this.graph.getNodesByType('databaseOperation')) {
+             if (keywords.some(k => db.label.toLowerCase().includes(k))) {
+                const edgeId = `EDGE-${reqNode.id}-${db.id}`;
+                this.graph.addEdge({
+                  edge_id: edgeId,
+                  from: reqNode.id,
+                  to: db.id,
+                  type: 'REQUIREMENT_SUPPORTED_BY',
+                  confidence: 0.8,
+                  evidence_refs: []
+                });
+                chainNodes.push(db.id);
+                chainEdges.push(edgeId);
+                foundConnection = true;
+             }
+          }
+
+          // 4. Link directly to matching Evidence nodes (documents, dependencies, source code)
+          for (const evd of this.graph.getNodesByType('evidence')) {
+             const evdLabel = (evd.label || '').toLowerCase();
+             const evdSource = (evd.source || '').toLowerCase();
+             const isDocClaim = evd.metadata?.claim_id === claim.claim_id;
+             const isMatch = isDocClaim || keywords.some(k => evdLabel.includes(k) || evdSource.includes(k));
+
+             if (isMatch) {
+                const edgeId = `EDGE-${reqNode.id}-${evd.id}`;
+                this.graph.addEdge({
+                  edge_id: edgeId,
+                  from: reqNode.id,
+                  to: evd.id,
+                  type: 'REQUIREMENT_SUPPORTED_BY',
+                  confidence: isDocClaim ? 1.0 : 0.75,
+                  evidence_refs: [evd.id]
+                });
+                chainNodes.push(evd.id);
+                chainEdges.push(edgeId);
                 foundConnection = true;
              }
           }
@@ -315,8 +383,8 @@ export class EvidenceGraphBuilder {
              claim_id: claim.claim_id,
              requirement_id: reqNode.id,
              completeness,
-             nodes: [],
-             edges: []
+             nodes: chainNodes,
+             edges: chainEdges
           });
        }
     }

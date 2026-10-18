@@ -626,6 +626,33 @@ export const ProjectService = {
   },
 
   /**
+   * Upload documentation file (.md, .txt, .pdf) to Valgent backend for claim extraction.
+   */
+  async uploadDocument(file: File, projectId?: string): Promise<{ doc_id: string; filename: string; message?: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (projectId) {
+      formData.append('project_id', projectId);
+    }
+
+    const userId = getCurrentUserId();
+    const res = await fetch(`${API_BASE_URL}/upload-docs`, {
+      method: 'POST',
+      headers: {
+        ...(userId ? { 'x-user-id': userId } : {})
+      },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Upload failed with status ${res.status}`);
+    }
+
+    return await res.json();
+  },
+
+  /**
    * Execute real POST /api/v1/analyze.
    * NEVER substitutes a fabricated report on error.
    */

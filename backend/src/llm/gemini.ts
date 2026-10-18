@@ -2,6 +2,14 @@ import { GoogleGenAI } from '@google/genai';
 import { Evidence } from '../shared/types';
 import { LLMProvider, LLMAnalysisResult, LLMValidationResult, LLMAnalysisSchema, LLMValidationSchema, ClaimValidationPackage } from './provider';
 
+function cleanJson(text: string): string {
+  let cleaned = text.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+  }
+  return cleaned.trim();
+}
+
 export class GeminiProvider implements LLMProvider {
   public readonly name = 'gemini';
   private ai: GoogleGenAI;
@@ -82,7 +90,8 @@ ${evidenceJson}
       throw new Error('Gemini returned empty response');
     }
 
-    const parsed = JSON.parse(response.text);
+    const cleaned = cleanJson(response.text);
+    const parsed = JSON.parse(cleaned);
     return LLMAnalysisSchema.parse(parsed);
   }
 
@@ -177,7 +186,8 @@ ${packagesText}
       throw new Error('Gemini returned empty response');
     }
 
-    const parsed = JSON.parse(response.text);
+    const cleaned = cleanJson(response.text);
+    const parsed = JSON.parse(cleaned);
     return LLMValidationSchema.parse(parsed);
   }
 }

@@ -493,4 +493,13 @@ export class ProjectStore {
     }
     return null;
   }
+
+  public static resetForTesting(): void {
+    ProjectStore.memoryCache = [];
+    try {
+      if (fs.existsSync(ProjectStore.DATA_FILE)) {
+        fs.unlinkSync(ProjectStore.DATA_FILE);
+      }
+    } catch {}
+  }
 }

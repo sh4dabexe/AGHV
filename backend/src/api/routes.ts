@@ -12,11 +12,12 @@ import { OpenRouterProvider } from '../llm/openrouter';
 import { ExecutionOrchestrator } from '../agents/execution';
 import { ValidationEngine } from '../validation/engine';
 import { ValidationOrchestrator } from '../validation/orchestrator';
-import { ProjectReport, AnalysisStage } from '../shared/types';
+import { ProjectReport, AnalysisStage, Claim } from '../shared/types';
 import { PipelineTracker } from '../shared/pipeline';
 import { redactSecrets, classifyLlmError, classifyError, AnalysisError } from '../shared/errors';
 import { ContextDigester } from '../context/digest';
 import { ProjectStore } from './project-store';
+import { ClaimExtractorService } from '../documents/claim-extractor';
 
 // ─── New sub-routers (Sprint 1-4) ────────────────────────────────────────────
 import ingestRoutes from './ingest-routes';
@@ -121,10 +122,38 @@ router.post('/analyze', async (req: Request, res: Response) => {
     plog(analysisId, 'Mapping project...');
     const map = await ProjectMapper.map(descriptor);
 
-    // 3. Extract Claims (record if present)
-    if (body.claims && body.claims.length > 0) {
-      tracker.enterStage('CLAIMS_EXTRACTED');
-      plog(analysisId, `Extracted ${body.claims.length} claims from request`);
+    // 3. Extract Claims
+    tracker.enterStage('CLAIMS_EXTRACTED');
+    let claims: Claim[] = (body.claims && body.claims.length > 0) ? body.claims : [];
+    if (claims.length === 0) {
+      plog(analysisId, 'Extracting claims from repository documentation and specifications...');
+      try {
+        claims = await ClaimExtractorService.extractFromRepositoryAndDocs({
+          repoPath: descriptor.local_path,
+          projectId: body.project_id,
+          projectMap: map,
+          engine: engine
+        });
+        plog(analysisId, `Extracted ${claims.length} claims from repository and docs`);
+      } catch (extractErr: any) {
+        perr(analysisId, 'Automatic claim extraction encountered an error', extractErr);
+      }
+    } else {
+      plog(analysisId, `Using ${claims.length} claims from request`);
+    }
+
+    // Register all claims as evidence
+    for (const c of claims) {
+      engine.addEvidence(
+        'DOC_CLAIM',
+        c.sourceFile || 'documentation',
+        c.text,
+        `Claim [${c.category || 'feature'}]: ${c.text}`,
+        c.sourceType || 'documentation',
+        undefined,
+        undefined,
+        { claim_id: c.claim_id, category: c.category, importance: c.importance }
+      );
     }
 
     // 4. Document Analysis & Static Analysis
@@ -167,7 +196,7 @@ router.post('/analyze', async (req: Request, res: Response) => {
     const { EvidenceGraphBuilder } = require('../evidence/graph-builder');
     const graphBuilder = new EvidenceGraphBuilder();
     const execResults = executionResult?.telemetry ? [executionResult.telemetry] : [];
-    const evidenceGraphObj = graphBuilder.build(body.claims || [], engine.getEvidence(), semanticModel, execResults);
+    const evidenceGraphObj = graphBuilder.build(claims, engine.getEvidence(), semanticModel, execResults);
     const evidenceGraph = evidenceGraphObj.serialize();
 
     // Record evidence IDs
@@ -194,17 +223,19 @@ router.post('/analyze', async (req: Request, res: Response) => {
         validateClaims: async () => { throw new Error('LLM skipped by policy'); }
       } : llmRouter;
 
-    if (body.claims && body.claims.length > 0) {
+    if (claims.length > 0) {
       tracker.enterStage('AUTONOMOUS_VALIDATION');
       plog(analysisId, body.analysis_options?.skip_llm ? 'Autonomous validation (LLM skipped)...' : 'Autonomous validation...');
       const valOrch = new ValidationOrchestrator(engine, descriptor.local_path, body.analysis_options?.skip_execution);
 
       try {
-        claimsValidation = await valOrch.orchestrate(body.claims, evidenceGraphObj, effectiveLlmRouter as any, contextDigest);
+        claimsValidation = await valOrch.orchestrate(claims, evidenceGraphObj, effectiveLlmRouter as any, contextDigest);
       } catch (err: any) {
         perr(analysisId, 'Autonomous validation failed', err);
         claimsValidation.audit_warnings.push({ message: err.message });
       }
+    } else {
+      plog(analysisId, 'No claims extracted for autonomous validation');
     }
 
     // Record validation action IDs
@@ -294,13 +325,7 @@ router.post('/analyze', async (req: Request, res: Response) => {
         status: llmFailed ? "INSUFFICIENT_EVIDENCE" : "COMPLETED",
         stages: tracker.getCompletedStageNames() as AnalysisStage[]
       },
-      summary: body.claims && body.claims.length > 0 ? ValidationEngine.calculateSummary(claimsValidation.validations) : {
-        claims_total: 0,
-        verified: 0,
-        partially_verified: 0,
-        not_verified: 0,
-        insufficient_evidence: 0
-      },
+      summary: ValidationEngine.calculateSummary(claimsValidation.validations || []),
       requirements: claimsValidation.validations || [],
       claims: claimsValidation.validations || [],
       evidence: engine.getEvidence(),

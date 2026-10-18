@@ -180,6 +180,13 @@ export type ValidationStatus = 'VERIFIED' | 'PARTIALLY_VERIFIED' | 'NOT_VERIFIED
 export interface Claim {
   claim_id: string;
   text: string;
+  category?: string;
+  importance?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  sourceType?: string;
+  sourceFile?: string;
+  sourceLocation?: string;
+  reasoning?: string;
+  recommendedAction?: string;
 }
 
 export interface ValidationResult {
@@ -193,6 +200,12 @@ export interface ValidationResult {
   checks: string[];
   limitations: string[];
   missing_evidence: string[];
+  category?: string;
+  importance?: string;
+  sourceType?: string;
+  sourceFile?: string;
+  sourceLocation?: string;
+  recommendedAction?: string;
 
   /** Optional TypeSafe Jev comparison data (Sprint 2) */
   typesafe?: {

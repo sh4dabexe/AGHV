@@ -82,16 +82,36 @@ export class ValidationEngine {
       const providerResult = await provider.validateClaims(packages);
 
       const combinedRoadmap = [...providerResult.roadmap];
+      const handledClaimIds = new Set(providerResult.roadmap.map(r => r.claim_id));
       packages.forEach(p => {
         if (p.deterministic_roadmap) {
-           p.deterministic_roadmap.forEach((task: any) => combinedRoadmap.push(task));
+           p.deterministic_roadmap.forEach((task: any) => {
+             if (!handledClaimIds.has(task.claim_id)) {
+               handledClaimIds.add(task.claim_id);
+               combinedRoadmap.push(task);
+             }
+           });
         }
       });
 
       // 2. Audit the results to ensure NO hallucinated evidence IDs
       const audited = ReportAuditor.audit(providerResult.validations, combinedRoadmap, evidenceStore, claims, graph);
 
-      return audited;
+      // Attach claim metadata onto validations
+      const enrichedValidations = audited.validations.map(v => {
+        const claimObj = claims.find(c => c.claim_id === v.claim_id);
+        return {
+          ...v,
+          category: claimObj?.category || (v as any).category || 'feature',
+          importance: claimObj?.importance || (v as any).importance || 'MEDIUM',
+          sourceType: claimObj?.sourceType || (v as any).sourceType || 'documentation',
+          sourceFile: claimObj?.sourceFile || (v as any).sourceFile || 'README.md',
+          sourceLocation: claimObj?.sourceLocation || (v as any).sourceLocation || '',
+          recommendedAction: claimObj?.recommendedAction || (v as any).recommendedAction
+        };
+      });
+
+      return { validations: enrichedValidations, roadmap: audited.roadmap, audit_warnings: audited.audit_warnings };
     } catch (error) {
       console.error('[ValidationEngine] Caught error:', error);
       // If provider fails, we degrade gracefully for all claims, using deterministic fallback
@@ -108,17 +128,30 @@ export class ValidationEngine {
            if (evalStatus.implementation_status === 'ABSENT' && evalStatus.execution_status === 'NOT_ATTEMPTED') finalStatus = 'INSUFFICIENT_EVIDENCE';
         }
 
+        const evRefs = pkg?.evidence?.map((e: any) => e.evidence_id) || [];
+        const graphRefs = pkg?.subgraph?.nodes?.map((n: any) => n.id) || [];
+
         return {
           claim_id: c.claim_id,
           text: c.text,
           status: finalStatus,
-          conclusion: 'Deterministic evidence was collected, but semantic synthesis was unavailable.',
-          evidence_refs: [],
-          graph_refs: [],
+          conclusion: finalStatus === 'VERIFIED' 
+            ? 'Verified by matching source code symbols and repository evidence.' 
+            : finalStatus === 'PARTIALLY_VERIFIED' 
+            ? 'Partially verified: implementation components found in codebase.'
+            : 'Deterministic evidence was collected; semantic synthesis was unavailable.',
+          evidence_refs: evRefs,
+          graph_refs: graphRefs,
           limitations: [],
           missing_evidence: [],
-          requirement_refs: [],
-          checks: []
+          requirement_refs: pkg?.requirement_id ? [pkg.requirement_id] : [],
+          checks: ['Deterministic AST and evidence matching'],
+          category: c.category || 'feature',
+          importance: c.importance || 'MEDIUM',
+          sourceType: c.sourceType || 'documentation',
+          sourceFile: c.sourceFile || 'README.md',
+          sourceLocation: c.sourceLocation || '',
+          recommendedAction: c.recommendedAction
         };
       });
 
@@ -136,10 +169,15 @@ export class ValidationEngine {
     };
 
     validations.forEach(v => {
-      if (v.status === 'VERIFIED') summary.verified++;
-      else if (v.status === 'PARTIALLY_VERIFIED') summary.partially_verified++;
-      else if (v.status === 'NOT_VERIFIED') summary.not_verified++;
-      else if (v.status === 'INSUFFICIENT_EVIDENCE') summary.insufficient_evidence++;
+      if (v.status === 'VERIFIED') {
+        summary.verified++;
+      } else if (v.status === 'PARTIALLY_VERIFIED') {
+        summary.partially_verified++;
+      } else if (v.status === 'NOT_VERIFIED') {
+        summary.not_verified++;
+      } else {
+        summary.insufficient_evidence++;
+      }
     });
 
     return summary;

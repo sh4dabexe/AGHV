@@ -196,12 +196,22 @@ export default function Analyze() {
 
           <ContextMetricsPanel project={result.report.project} />
 
-          {result.report.requirements && result.report.requirements.length > 0 && (
+          {result.report.requirements && result.report.requirements.length > 0 ? (
             <div className="glass-panel">
               <div className="panel-title">Evaluated Claims</div>
               {result.report.requirements.map(claim => (
                 <ClaimCard key={claim.claim_id} claim={claim} graph={result.report.evidence_graph} />
               ))}
+            </div>
+          ) : (
+            <div className="glass-panel" style={{ textAlign: 'center', padding: '2rem' }}>
+              <h3 style={{ marginBottom: '0.5rem' }}>No Verifiable Software Claims Identified</h3>
+              <p style={{ color: '#9ca3af', marginBottom: '0.5rem' }}>
+                No explicit software claims found in README, docs, or manifests.
+              </p>
+              <p style={{ fontSize: '0.875rem', color: '#9ca3af' }}>
+                Suggestions: Add documentation files or specifications, or define custom claims to verify.
+              </p>
             </div>
           )}
 

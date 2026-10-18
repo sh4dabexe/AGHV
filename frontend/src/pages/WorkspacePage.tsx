@@ -32,7 +32,8 @@ import {
   AlertTriangle,
   Info,
   Network,
-  FolderGit2
+  FolderGit2,
+  HelpCircle
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -272,6 +273,14 @@ export const WorkspacePage: React.FC = () => {
       setUploadedFiles((prev) => [...prev, tempEntry]);
 
       try {
+        // 1. Upload to Valgent backend for document parsing and claim extraction
+        try {
+          await ProjectService.uploadDocument(file, project.id);
+        } catch (backendUploadErr) {
+          console.warn('[WorkspacePage] Backend doc upload warning:', backendUploadErr);
+        }
+
+        // 2. Also persist to Supabase storage if user is logged in
         if (user?.id) {
           const uploaded = await uploadProjectRequirementFile({
             project,
@@ -832,8 +841,58 @@ export const WorkspacePage: React.FC = () => {
                 )}
               </section>
 
+              {/* Section: If analysis finished with zero claims */}
+              {report && report.summary.total_claims === 0 && (
+                <section className="dashboard-card p-8 sm:p-10 flex flex-col items-center text-center gap-5 border border-amber-500/30 bg-amber-500/5 rounded-2xl">
+                  <div className="p-4 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                    <HelpCircle className="w-8 h-8" />
+                  </div>
+                  <div className="flex flex-col gap-2 max-w-xl">
+                    <h3 className="text-lg sm:text-xl font-bold font-heading text-[var(--text-primary)]">
+                      No Verifiable Software Claims Identified
+                    </h3>
+                    <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+                      The analysis inspected repository files and documentation, but did not discover explicit, testable capability statements.
+                    </p>
+                  </div>
+
+                  <div className="w-full max-w-md p-4 rounded-xl bg-black/5 dark:bg-white/5 border border-[var(--border-soft)] text-left text-xs space-y-2">
+                    <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                      <span>Repository:</span>
+                      <span className="font-mono font-semibold text-[var(--text-primary)] truncate max-w-[240px]">{project.repositoryUrl}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                      <span>Uploaded Specifications:</span>
+                      <span className="font-mono font-semibold text-[var(--text-primary)]">{uploadedFiles.length} files</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[var(--text-secondary)]">
+                      <span>Analysis Status:</span>
+                      <span className="font-mono font-bold text-amber-500">{report.status}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 max-w-md text-xs text-[var(--text-muted)] text-left">
+                    <p className="font-bold text-[var(--text-primary)]">Recommended Actions:</p>
+                    <ul className="list-disc pl-4 space-y-1">
+                      <li>Upload a requirements document (.md, .txt) with concrete feature assertions above.</li>
+                      <li>Ensure your repository's <code className="text-xs font-mono">README.md</code> includes clear feature and API capability descriptions.</li>
+                      <li>Click "Sync & Recheck" to re-run the verification pipeline.</li>
+                    </ul>
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={() => fileInputRef.current?.click()}
+                    leftIcon={<UploadCloud className="w-4 h-4" />}
+                  >
+                    Upload Specification File
+                  </Button>
+                </section>
+              )}
+
               {/* Section: Metrics (4 Separate Cards) */}
-              {report && (
+              {report && report.summary.total_claims > 0 && (
                 <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
                   {/* Card 1: Total Claims */}
                   <div className="metric-card">
@@ -861,10 +920,15 @@ export const WorkspacePage: React.FC = () => {
                       </span>
                       <CheckCircle2 className="w-4 h-4 text-[var(--status-verified)]" />
                     </div>
-                    <div className="my-2">
+                    <div className="my-2 flex items-baseline gap-2">
                       <span className="text-3xl sm:text-4xl font-extrabold font-heading text-[var(--status-verified)]">
                         {report.summary.verified_count}
                       </span>
+                      {report.summary.total_claims > 0 && (
+                        <span className="text-xs font-bold text-[var(--status-verified)]">
+                          ({Math.round((report.summary.verified_count / report.summary.total_claims) * 100)}%)
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs text-[var(--text-muted)]">
                       Proven with AST line citations
@@ -910,7 +974,7 @@ export const WorkspacePage: React.FC = () => {
               )}
 
               {/* Section: Main Content Area with Claims (68%) + Roadmap (32%) */}
-              {report && (
+              {report && report.summary.total_claims > 0 && (
                 <section className="grid grid-cols-1 lg:grid-cols-12 gap-7 sm:gap-8 items-start">
                   {/* Left Column: Claims (~68%) */}
                   <div className="lg:col-span-8 flex flex-col gap-4">
