@@ -11,7 +11,26 @@ import {
 } from '../types/report';
 import { SupabaseService } from './supabase-service';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://valgent.onrender.com/api/v1';
+export function getApiBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (!envUrl || envUrl.trim() === '') {
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      return 'http://localhost:3000/api/v1';
+    }
+    return '/api/v1';
+  }
+  let url = envUrl.trim().replace(/\/+$/, '');
+  if (!url.endsWith('/api/v1')) {
+    if (url.endsWith('/api')) {
+      url = `${url}/v1`;
+    } else {
+      url = `${url}/api/v1`;
+    }
+  }
+  return url;
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export interface ApiError {
   code: string;
